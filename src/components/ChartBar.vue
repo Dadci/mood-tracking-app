@@ -209,32 +209,8 @@ const chartOptions = {
   },
   plugins: {
     legend: { display: false },
-    tooltip: {
-      enabled: true,
-      backgroundColor: "white",
-      titleColor: "#1F2937",
-      bodyColor: "#6B7280",
-      borderColor: "#E5E7EB",
-      borderWidth: 1,
-      cornerRadius: 12,
-      displayColors: false,
-      padding: 16,
-      bodyFont: {
-        size: 14,
-      },
-      titleFont: {
-        size: 16,
-        weight: "bold",
-      },
-      callbacks: {
-        title: function (tooltipItems) {
-          return "Mood";
-        },
-        label: (context) => {
-          const category = sleepCategoryData[context.dataIndex];
-          return `Sleep: ${category} hours`;
-        },
-      },
+    tooltip: { enabled: true,
+      
     },
   },
   scales: {
