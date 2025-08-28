@@ -28,7 +28,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { Chart, registerables } from "chart.js";
 import { useMoodStore } from "../store/moodStore.js";
 
@@ -46,35 +46,17 @@ const chartCanvas = ref(null);
 let chartInstance = null;
 let loadedImages = {};
 
-// Generate dynamic dates (last 11 days)
-const generateDynamicDates = () => {
-  const dates = [];
-  const today = new Date();
-
-  for (let i = 10; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - i);
-
-    const month = date.toLocaleDateString("en-US", { month: "short" });
-    const day = date.getDate().toString().padStart(2, "0");
-
-    dates.push(`${month} ${day}`);
-  }
-
-  return dates;
-};
-
-// Preload images
+// Preload images with correct mood mapping
 const preloadImages = async () => {
-  const iconPaths = [
-    { key: "verySad", src: iconVerySadWhite },
-    { key: "sad", src: iconSadWhite },
-    { key: "neutral", src: iconNeutralWhite },
-    { key: "happy", src: iconHappyWhite },
-    { key: "veryHappy", src: iconVeryHappyWhite },
-  ];
+  const iconPaths = {
+    "-2": iconVerySadWhite,
+    "-1": iconSadWhite,
+    0: iconNeutralWhite,
+    1: iconHappyWhite,
+    2: iconVeryHappyWhite,
+  };
 
-  const promises = iconPaths.map(({ key, src }) => {
+  const promises = Object.entries(iconPaths).map(([key, src]) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -97,87 +79,79 @@ const preloadImages = async () => {
   }
 };
 
-// FIXED: Sleep categories mapping with proper chart values
+// Sleep categories mapping
 const getSleepCategoryData = (category) => {
   switch (category) {
     case "9+":
-      return { color: "#FFC97C", emoji: "veryHappy", chartValue: 8 }; // 9+ hours - Yellow
+      return { color: "#FFC97C", chartValue: 8 };
     case "7-8":
-      return { color: "#89E780", emoji: "happy", chartValue: 6 }; // 7-8 hours - Green
+      return { color: "#89E780", chartValue: 6 };
     case "5-6":
-      return { color: "#89CAFF", emoji: "neutral", chartValue: 4 }; // 5-6 hours - Blue
+      return { color: "#89CAFF", chartValue: 4 };
     case "3-4":
-      return { color: "#B8B1FF", emoji: "sad", chartValue: 2 }; // 3-4 hours - Violet
+      return { color: "#B8B1FF", chartValue: 2 };
     case "0-2":
-      return { color: "#FF9B99", emoji: "verySad", chartValue: 2 }; // 0-2 hours - Red (increased to 2)
+      return { color: "#FF9B99", chartValue: 2 };
     default:
-      return { color: "#89CAFF", emoji: "neutral", chartValue: 4 };
+      return { color: "#89CAFF", chartValue: 4 };
   }
 };
 
-// Sample sleep category data (predefined categories from radio/select)
-const sleepCategoryData = [
-  "5-6",
-  "9+",
-  "3-4",
-  "7-8",
-  "7-8",
-  "9+",
-  "0-2",
-  "5-6",
-  "7-8",
-  "0-2",
-  "9+",
-];
+// Generate the last 11 dates including today
+const generateDateRange = () => {
+  const dates = [];
+  const today = new Date();
 
-// Generate colors and chart data dynamically
-const generateChartData = () => {
-  if (moodStore.moodEntries.length === 0) {
-    return {
-      labels: [],
-      datasets: [
-        {
-          data: [],
-          backgroundColor: [],
-          borderRadius: {
-            topLeft: 24,
-            topRight: 24,
-            bottomLeft: 24,
-            bottomRight: 24,
-          },
-          borderSkipped: false,
-        },
-      ],
-    };
+  for (let i = 10; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    dates.push(date);
   }
 
-  // Sort entries by date and get last 11 entries
-  const sortedEntries = [...moodStore.moodEntries]
-    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-    .slice(-11);
+  return dates;
+};
 
-  const labels = sortedEntries.map((entry) => {
-    const date = new Date(entry.createdAt);
+// Generate chart data with all dates but only bars for logged days
+const generateChartData = () => {
+  const dateRange = generateDateRange();
+
+  // Create labels for all dates
+  const labels = dateRange.map((date) => {
     const month = date.toLocaleDateString("en-US", { month: "short" });
     const day = date.getDate().toString().padStart(2, "0");
     return `${month} ${day}`;
   });
 
-  const sleepData = sortedEntries.map((entry) => {
-    // Convert sleep hours back to categories for color mapping
-    const hours = entry.sleepHours;
-    if (hours >= 8.5) return "9+";
-    if (hours >= 6.5) return "7-8";
-    if (hours >= 4.5) return "5-6";
-    if (hours >= 2.5) return "3-4";
-    return "0-2";
+  // Create data array with null values for days without entries
+  const sleepData = dateRange.map((date) => {
+    const dateStr = date.toISOString().split("T")[0];
+
+    // Find mood entry for this date
+    const entry = moodStore.moodEntries.find((entry) => {
+      const entryDate = new Date(entry.createdAt).toISOString().split("T")[0];
+      return entryDate === dateStr;
+    });
+
+    if (entry) {
+      // Convert sleep hours to category
+      const hours = entry.sleepHours;
+      if (hours >= 8.5) return "9+";
+      if (hours >= 6.5) return "7-8";
+      if (hours >= 4.5) return "5-6";
+      if (hours >= 2.5) return "3-4";
+      return "0-2";
+    }
+
+    return null; // No data for this date
   });
 
-  const colors = sleepData.map(
-    (category) => getSleepCategoryData(category).color
+  // Create colors and values arrays
+  const colors = sleepData.map((category) =>
+    category ? getSleepCategoryData(category).color : "transparent"
   );
-  const values = sleepData.map(
-    (category) => getSleepCategoryData(category).chartValue
+
+  const values = sleepData.map((category) =>
+    category ? getSleepCategoryData(category).chartValue : null
   );
 
   return {
@@ -194,6 +168,7 @@ const generateChartData = () => {
         },
         borderSkipped: false,
         barThickness: 40,
+        maxBarThickness: 40,
       },
     ],
   };
@@ -209,8 +184,90 @@ const chartOptions = {
   },
   plugins: {
     legend: { display: false },
-    tooltip: { enabled: true,
-      
+    tooltip: {
+      enabled: true,
+      backgroundColor: "white",
+      titleColor: "#1F2937",
+      bodyColor: "#6B7280",
+      borderColor: "#E5E7EB",
+      borderWidth: 1,
+      cornerRadius: 12,
+      displayColors: false,
+      padding: 16,
+      bodyFont: {
+        size: 14,
+      },
+      titleFont: {
+        size: 16,
+        weight: "bold",
+      },
+      callbacks: {
+        title: function (tooltipItems) {
+          return "Mood";
+        },
+        label: function (context) {
+          const dataIndex = context.dataIndex;
+          const dateRange = generateDateRange();
+          const date = dateRange[dataIndex];
+          const dateStr = date.toISOString().split("T")[0];
+
+          // Find mood entry for this date
+          const entry = moodStore.moodEntries.find((entry) => {
+            const entryDate = new Date(entry.createdAt)
+              .toISOString()
+              .split("T")[0];
+            return entryDate === dateStr;
+          });
+
+          if (entry) {
+            const moodLabels = {
+              "-2": "Very Sad",
+              "-1": "Sad",
+              0: "Neutral",
+              1: "Happy",
+              2: "Very Happy",
+            };
+
+            const moodIcons = {
+              "-2": "😢",
+              "-1": "😞",
+              0: "😐",
+              1: "😊",
+              2: "😄",
+            };
+
+            const moodLabel = moodLabels[entry.mood.toString()];
+            const moodIcon = moodIcons[entry.mood.toString()];
+            const sleepHours =
+              entry.sleepHours >= 8.5
+                ? "9+"
+                : entry.sleepHours >= 6.5
+                ? "7-8"
+                : entry.sleepHours >= 4.5
+                ? "5-6"
+                : entry.sleepHours >= 2.5
+                ? "3-4"
+                : "0-2";
+
+            return [
+              `${moodIcon} ${moodLabel}`,
+              "",
+              "Sleep",
+              `${sleepHours} hours`,
+              "",
+              "Reflection",
+              entry.journalEntry || "No reflection added.",
+              "",
+              "Tags",
+              entry.tags && entry.tags.length > 0
+                ? entry.tags.join(", ")
+                : "No tags",
+            ];
+          }
+
+          return "No data";
+        },
+      },
     },
   },
   scales: {
@@ -253,40 +310,75 @@ const chartOptions = {
   },
 };
 
-// Dynamic emoji plugin with better positioning for small bars
+// Fixed emoji plugin - position above the bar using bar element
 const emojiPlugin = {
   id: "emojiPlugin",
   afterDatasetsDraw(chart) {
-    const ctx = chart.ctx;
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
 
-    chart.data.datasets.forEach((dataset, i) => {
-      const meta = chart.getDatasetMeta(i);
-      meta.data.forEach((bar, index) => {
-        const category = sleepCategoryData[index];
-        const sleepData = getSleepCategoryData(category);
-        const img = loadedImages[sleepData.emoji];
+    meta.data.forEach((bar, index) => {
+      if (!bar || bar.height === 0) return; // Skip if no bar
 
-        if (img && img.complete) {
-          const iconSize = 30; // Reduced size for better fit
-          const barHeight = Math.abs(bar.base - bar.y);
+      const x = bar.x;
+      let iconY;
 
-          // Adjust positioning based on bar height
-          let iconY;
-          if (barHeight < 40) {
-            // For very small bars
-            iconY = bar.y + 5; // Position closer to top
-          } else {
-            iconY = bar.y + 10; // Normal positioning
-          }
+      // Find the corresponding mood entry for this date
+      const dateRange = generateDateRange();
+      const date = dateRange[index];
+      const dateStr = date.toISOString().split("T")[0];
 
-          ctx.save();
-          ctx.drawImage(img, bar.x - iconSize / 2, iconY, iconSize, iconSize);
-          ctx.restore();
-        }
+      const entry = moodStore.moodEntries.find((entry) => {
+        const entryDate = new Date(entry.createdAt).toISOString().split("T")[0];
+        return entryDate === dateStr;
       });
+
+      if (entry && loadedImages[entry.mood]) {
+        const iconSize = 30;
+        const iconX = x - iconSize / 2;
+
+        // Use bar positioning like the original
+        if (bar.height > 100) {
+          iconY = bar.y + 5; // Position closer to top
+        } else {
+          iconY = bar.y + 10; // Normal positioning
+        }
+
+        ctx.drawImage(
+          loadedImages[entry.mood],
+          iconX,
+          iconY,
+          iconSize,
+          iconSize
+        );
+      }
     });
   },
 };
+
+// Watch for changes in mood entries and update chart
+watch(
+  () => moodStore.moodEntries.length,
+  () => {
+    if (chartInstance && moodStore.moodEntries.length > 0) {
+      chartInstance.data = generateChartData();
+      chartInstance.update();
+    }
+  },
+  { deep: true }
+);
+
+// Also watch for changes in the entries themselves (not just length)
+watch(
+  () => moodStore.moodEntries,
+  () => {
+    if (chartInstance) {
+      chartInstance.data = generateChartData();
+      chartInstance.update();
+    }
+  },
+  { deep: true }
+);
 
 onMounted(async () => {
   await preloadImages();
